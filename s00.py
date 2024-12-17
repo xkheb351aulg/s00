@@ -14,6 +14,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 DATA_API_URL = "https://s00reg.64t76dee9sk5.workers.dev/api"
 NOTIFICATION_API_URL = "https://api.day.app/Y6wZN8swvDrno2URYa5CDZ/"
 
+# 固定注册 URL
+REGISTRATION_URL = "https://www.serv00.com/offer/create_new_account"
+
 # 初始化 WebDriver 配置
 def init_webdriver(user_agent):
     options = webdriver.ChromeOptions()
@@ -31,7 +34,7 @@ def fetch_user_data():
             response = requests.get(DATA_API_URL)
             response.raise_for_status()
             data = response.json()
-            return data['url'], data['user'], data['userAgent']
+            return data['user'], data['userAgent']
         except Exception as e:
             logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
@@ -157,18 +160,18 @@ def main():
             try:
                 # 如果预加载数据已完成，使用预加载数据；否则直接获取
                 if preloaded_data['data']:
-                    registration_url, user, user_agent = preloaded_data['data']
+                    user, user_agent = preloaded_data['data']
                     preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
                     preload_thread.start()
                 else:
-                    registration_url, user, user_agent = fetch_user_data()
+                    user, user_agent = fetch_user_data()
 
                 # 初始化 WebDriver（只在第一次初始化）
                 if not driver:
                     driver = init_webdriver(user_agent)
 
                 # 访问注册页面
-                driver.get(registration_url)
+                driver.get(REGISTRATION_URL)
 
                 # 填写表单
                 fill_form(driver, user)
