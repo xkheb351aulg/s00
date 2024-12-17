@@ -54,7 +54,7 @@ def fill_form(driver, user):
         wait.until(EC.presence_of_element_located((By.ID, "id_last_name"))).send_keys(user['lastName'])
         wait.until(EC.presence_of_element_located((By.ID, "id_username"))).send_keys(user['username'])
         wait.until(EC.presence_of_element_located((By.ID, "id_email"))).send_keys(user['email'])
-        wait.until(EC.presence_of_element_located((By.ID, "id_question"))).send_keys("1000")
+        wait.until(EC.presence_of_element_located((By.ID, "id_question"))).send_keys("888")
 
         # 勾选服务条款
         tos_checkbox = wait.until(EC.element_to_be_clickable((By.ID, "id_tos")))
