@@ -1,0 +1,49 @@
+name: Automated Registration
+
+on:
+  push:
+    branches:
+      - main  # 当推送到 `main` 分支时触发，可以根据需求修改触发条件
+  pull_request:
+    branches:
+      - main  # 当创建 PR 时触发
+
+jobs:
+  run-registration:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2  # 检出当前仓库的代码
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'  # 设置 Python 版本为 3.9，可以根据需要修改
+
+    - name: Install dependencies
+      run: |
+        # 安装必要的系统依赖和 Python 库
+        sudo apt-get update
+        sudo apt-get install -y \
+          libnss3 \
+          libx11-dev \
+          libx11-xcb-dev \
+          libxcomposite-dev \
+          libxdamage-dev \
+          libxrandr-dev \
+          x11-utils \
+          libgbm-dev \
+          wget
+        # 安装 Chrome 浏览器
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        sudo dpkg -i google-chrome-stable_current_amd64.deb
+        sudo apt-get -f install -y  # 安装 Chrome 依赖
+        # 安装 Python 的依赖包
+        pip install --upgrade pip
+        pip install selenium requests
+
+    - name: Run the registration script
+      run: |
+        # 执行自动化脚本
+        python s00.py  # 将 your_script.py 替换为你的 Python 脚本文件名
