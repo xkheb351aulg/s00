@@ -3,7 +3,7 @@ name: Automated Registration
 on:
   push:
     branches:
-      - main  # 当推送到 `main` 分支时触发，可以根据需求修改触发条件
+      - main  # 当推送到 `main` 分支时触发，可以根据需求修改触发条
   pull_request:
     branches:
       - main  # 当创建 PR 时触发
