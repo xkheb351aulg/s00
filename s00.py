@@ -1,7 +1,6 @@
 import requests
 import logging
 import time
-import random
 from threading import Thread
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -27,7 +26,7 @@ def init_webdriver(user_agent, proxy=None):
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    
+
     # 模拟语言设置
     options.add_argument("--lang=en-US")
 
@@ -43,14 +42,27 @@ def init_webdriver(user_agent, proxy=None):
     options.add_experimental_option("useAutomationExtension", False)
 
     # 配置性能
-    prefs = {"profile.default_content_setting_values.notifications": 2, "credentials_enable_service": False, "profile.password_manager_enabled": False}
+    prefs = {
+        "profile.default_content_setting_values.notifications": 2,
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False
+    }
     options.add_experimental_option("prefs", prefs)
 
     driver = webdriver.Chrome(options=options)
 
     # 进一步隐藏特征
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4});
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ? Promise.resolve({ state: 'denied' }) : originalQuery(parameters)
+            );
+        """
     })
 
     return driver
@@ -65,7 +77,7 @@ def fetch_user_data():
             return data['user'], data['userAgent'], data.get('proxy')
         except Exception as e:
             logging.error(f"获取用户数据失败，重试中: {e}")
-            time.sleep(random.uniform(1, 3))
+            time.sleep(2)
 
 # 预加载下一次注册数据
 def preload_user_data(preloaded_data):
@@ -79,13 +91,9 @@ def fill_form(driver, user):
     wait = WebDriverWait(driver, 10)
     try:
         wait.until(EC.presence_of_element_located((By.ID, "id_first_name"))).send_keys(user['firstName'])
-        time.sleep(random.uniform(0.5, 1.5))
         wait.until(EC.presence_of_element_located((By.ID, "id_last_name"))).send_keys(user['lastName'])
-        time.sleep(random.uniform(0.5, 1.5))
         wait.until(EC.presence_of_element_located((By.ID, "id_username"))).send_keys(user['username'])
-        time.sleep(random.uniform(0.5, 1.5))
         wait.until(EC.presence_of_element_located((By.ID, "id_email"))).send_keys(user['email'])
-        time.sleep(random.uniform(0.5, 1.5))
         wait.until(EC.presence_of_element_located((By.ID, "id_question"))).send_keys("1000")
 
         # 勾选服务条款
@@ -120,8 +128,6 @@ def wait_for_result(driver, attempt_number):
                 return False
         except:
             pass
-
-        time.sleep(random.uniform(0.5, 1))
 
     logging.warning(f"第 {attempt_number} 次注册超时")
     return False
