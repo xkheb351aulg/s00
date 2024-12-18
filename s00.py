@@ -15,7 +15,11 @@ DATA_API_URL = "https://s00reg.64t76dee9sk5.workers.dev/666"
 NOTIFICATION_API_URL = "https://api.day.app/Y6wZN8swvDrno2URYa5CDZ/"
 REGISTRATION_URL = "https://www.serv00.com/offer/create_new_account"
 
-# 初始化 WebDriver 配置（更高级的伪装）
+# 验证码识别 API
+CAPTCHA_SOLVER_API_URL = "https://ocrapi.gits.one/?ocr"
+CAPTCHA_SOLVER_API_KEY = "Bearer fivl7VyjCAYWmUgWj1psGfxz71aqFHmOFSsdWdyEjipSWiQZUXzc0E039PQszBzu"
+
+# 初始化 WebDriver 配置（高级伪装）
 def init_webdriver(user_agent):
     options = webdriver.ChromeOptions()
     options.add_argument(f"user-agent={user_agent}")
@@ -27,48 +31,26 @@ def init_webdriver(user_agent):
     options.add_experimental_option("useAutomationExtension", False)
     driver = webdriver.Chrome(options=options)
 
-    # 注入高级伪装脚本
+    # 注入伪装脚本
     script = """
-    // 隐藏 WebDriver 属性
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-
-    // 伪造插件信息
     Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-
-    // 伪造语言和时区
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     Object.defineProperty(Intl.DateTimeFormat.prototype, 'resolvedOptions', {
         value: () => ({ timeZone: 'America/New_York' })
     });
-
-    // 伪造硬件信息
     Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
     Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    Object.defineProperty(screen, 'width', { get: () => 1920 });
-    Object.defineProperty(screen, 'height', { get: () => 1080 });
-
-    // 禁用 WebRTC
-    Object.defineProperty(navigator, 'mediaDevices', { 
-        get: () => ({ getUserMedia: () => { throw new Error("WebRTC is disabled"); } }) 
-    });
-
-    // 禁用 WebGL 指纹检测
     const getParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        // 避免暴露 GPU 供应商和渲染器信息
         if (parameter === 37445 || parameter === 37446) {
             return "Intel Open Source Technology Center";
         }
         return getParameter(parameter);
     };
-
-    // 模拟真实插件
-    Object.defineProperty(navigator, 'mimeTypes', { 
-        get: () => [{ type: 'application/pdf' }, { type: 'application/x-google-chrome-pdf' }] 
-    });
     """
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": script})
-    logging.info("WebDriver 已完成高级伪装")
+    logging.info("WebDriver 高级伪装已完成")
     return driver
 
 # 获取用户数据
@@ -110,9 +92,30 @@ def fill_form(driver, user):
         return False
     return True
 
+# 解决验证码
+def solve_captcha(image_path):
+    headers = {'Authorization': CAPTCHA_SOLVER_API_KEY}
+    while True:
+        try:
+            with open(image_path, 'rb') as image_file:
+                response = requests.post(CAPTCHA_SOLVER_API_URL, headers=headers, files={'image': image_file})
+                response.raise_for_status()
+                result = response.json()
+                if result['success']:
+                    captcha_code = result['result']
+                    logging.info(f"验证码识别成功: {captcha_code}")
+                    return captcha_code
+                else:
+                    logging.warning("验证码识别失败，重试中")
+        except Exception as e:
+            logging.error(f"OCR API 调用失败，重试中: {e}")
+        time.sleep(2)
+
 # 等待注册结果并处理验证码
 def wait_for_result(driver, attempt_number):
     start_time = time.time()
+    captcha_filled = False
+
     while time.time() - start_time < 60:
         try:
             success_notification = driver.find_element(By.CSS_SELECTOR, ".notification.is-success")
@@ -130,9 +133,24 @@ def wait_for_result(driver, attempt_number):
         except:
             pass
 
+        try:
+            captcha_image = driver.find_element(By.CSS_SELECTOR, ".captcha")
+            if not captcha_filled and captcha_image.is_displayed():
+                captcha_image_path = "/tmp/captcha_image.png"
+                with open(captcha_image_path, 'wb') as file:
+                    file.write(captcha_image.screenshot_as_png)
+
+                captcha_code = solve_captcha(captcha_image_path)
+                if captcha_code:
+                    driver.find_element(By.ID, "id_captcha_1").send_keys(captcha_code)
+                    driver.find_element(By.CSS_SELECTOR, ".button.is-primary").click()
+                    captcha_filled = True
+        except:
+            pass
+
         time.sleep(0.5)
 
-    logging.warning(f"第 {attempt_number} 次注册超时，未检测到成功或失败的提示")
+    logging.warning(f"第 {attempt_number} 次注册超时")
     return False
 
 # 发送注册成功通知
