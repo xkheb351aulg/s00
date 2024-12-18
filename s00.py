@@ -6,7 +6,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from threading import Thread
-from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -56,7 +55,7 @@ def init_webdriver(user_agent):
 
 # 获取用户数据
 def fetch_user_data():
-    """获取用户数据，并返回相应的信息"""
+    """获取用户数据，若失败则重试"""
     while True:
         try:
             response = requests.get(DATA_API_URL)
@@ -66,6 +65,14 @@ def fetch_user_data():
         except Exception as e:
             logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
+
+# 预加载下一次注册数据
+def preload_user_data(preloaded_data):
+    """异步预加载下一次注册用户数据"""
+    try:
+        preloaded_data['data'] = fetch_user_data()
+    except Exception as e:
+        logging.error(f"预加载用户数据失败: {e}")
 
 # 填写表单
 def fill_form(driver, user):
@@ -89,7 +96,7 @@ def fill_form(driver, user):
 
 # 解决验证码
 def solve_captcha(image_path):
-    """解决验证码"""
+    """调用OCR API解决验证码"""
     api_url = "https://ocrapi.gits.one/?ocr"
     headers = {'Authorization': 'Bearer fivl7VyjCAYWmUgWj1psGfxz71aqFHmOFSsdWdyEjipSWiQZUXzc0E039PQszBzu'}
     while True:
@@ -110,7 +117,7 @@ def solve_captcha(image_path):
 
 # 等待注册结果并处理验证码
 def wait_for_result(driver, attempt_number):
-    """等待注册结果并处理验证码"""
+    """等待注册结果，并处理验证码"""
     start_time = time.time()
     captcha_filled = False
 
@@ -152,55 +159,54 @@ def wait_for_result(driver, attempt_number):
     return False
 
 # 发送注册成功通知
-def send_success_notification(username):
-    """发送注册成功通知"""
+def send_success_notification(user):
+    """发送包含详细信息的注册成功通知"""
     try:
-        response = requests.get(f"{NOTIFICATION_API_URL}{username}@proton.me")
+        message = f"注册成功！\n用户名: {user['username']}\n邮箱: {user['email']}\n名字: {user['firstName']} {user['lastName']}"
+        response = requests.get(f"{NOTIFICATION_API_URL}{message}")
         response.raise_for_status()
-        logging.info(f"通知发送完成: {username}@proton.me")
+        logging.info(f"通知发送完成: {message}")
     except Exception as e:
         logging.error(f"通知发送失败: {e}")
 
 # 主流程
 def main():
+    """主流程"""
     preloaded_data = {'data': None}
     attempt_number = 0
 
-    # 使用线程池管理并发
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        preload_future = executor.submit(preload_user_data, preloaded_data)
-        
-        driver = None
-        try:
-            while True:
-                attempt_number += 1
-                logging.info(f"开始第 {attempt_number} 次注册")
+    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
+    preload_thread.start()
 
-                try:
-                    # 等待预加载数据
-                    preload_future.result(timeout=30)
-                    
-                    if preloaded_data['data']:
-                        registration_url, user, user_agent = preloaded_data['data']
-                        preload_future = executor.submit(preload_user_data, preloaded_data)
-                    else:
-                        registration_url, user, user_agent = fetch_user_data()
+    driver = None
+    try:
+        while True:
+            attempt_number += 1
+            logging.info(f"开始第 {attempt_number} 次注册")
 
-                    if not driver:
-                        driver = init_webdriver(user_agent)
+            try:
+                if preloaded_data['data']:
+                    registration_url, user, user_agent = preloaded_data['data']
+                    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
+                    preload_thread.start()
+                else:
+                    registration_url, user, user_agent = fetch_user_data()
 
-                    driver.get(registration_url)
-                    fill_form(driver, user)
+                if not driver:
+                    driver = init_webdriver(user_agent)
 
-                    if wait_for_result(driver, attempt_number):
-                        send_success_notification(user['username'])
+                driver.get(registration_url)
+                fill_form(driver, user)
 
-                except Exception as e:
-                    logging.error(f"注册失败: {e}，重新尝试...")
+                if wait_for_result(driver, attempt_number):
+                    send_success_notification(user)
 
-        finally:
-            if driver:
-                driver.quit()
+            except Exception as e:
+                logging.error(f"注册失败: {e}，重新尝试...")
+
+    finally:
+        if driver:
+            driver.quit()
 
 if __name__ == "__main__":
     main()
