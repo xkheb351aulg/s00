@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -55,6 +56,7 @@ def init_webdriver(user_agent):
 
 # 获取用户数据
 def fetch_user_data():
+    """获取用户数据，并返回相应的信息"""
     while True:
         try:
             response = requests.get(DATA_API_URL)
@@ -65,15 +67,9 @@ def fetch_user_data():
             logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
 
-# 预加载下一次注册数据
-def preload_user_data(preloaded_data):
-    try:
-        preloaded_data['data'] = fetch_user_data()
-    except Exception as e:
-        logging.error(f"预加载用户数据失败: {e}")
-
 # 填写表单
 def fill_form(driver, user):
+    """填写注册表单"""
     wait = WebDriverWait(driver, 10)
     try:
         wait.until(EC.presence_of_element_located((By.ID, "id_first_name"))).send_keys(user['firstName'])
@@ -93,6 +89,7 @@ def fill_form(driver, user):
 
 # 解决验证码
 def solve_captcha(image_path):
+    """解决验证码"""
     api_url = "https://ocrapi.gits.one/?ocr"
     headers = {'Authorization': 'Bearer fivl7VyjCAYWmUgWj1psGfxz71aqFHmOFSsdWdyEjipSWiQZUXzc0E039PQszBzu'}
     while True:
@@ -113,6 +110,7 @@ def solve_captcha(image_path):
 
 # 等待注册结果并处理验证码
 def wait_for_result(driver, attempt_number):
+    """等待注册结果并处理验证码"""
     start_time = time.time()
     captcha_filled = False
 
@@ -155,6 +153,7 @@ def wait_for_result(driver, attempt_number):
 
 # 发送注册成功通知
 def send_success_notification(username):
+    """发送注册成功通知"""
     try:
         response = requests.get(f"{NOTIFICATION_API_URL}{username}@proton.me")
         response.raise_for_status()
@@ -167,38 +166,41 @@ def main():
     preloaded_data = {'data': None}
     attempt_number = 0
 
-    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
-    preload_thread.start()
+    # 使用线程池管理并发
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        preload_future = executor.submit(preload_user_data, preloaded_data)
+        
+        driver = None
+        try:
+            while True:
+                attempt_number += 1
+                logging.info(f"开始第 {attempt_number} 次注册")
 
-    driver = None
-    try:
-        while True:
-            attempt_number += 1
-            logging.info(f"开始第 {attempt_number} 次注册")
+                try:
+                    # 等待预加载数据
+                    preload_future.result(timeout=30)
+                    
+                    if preloaded_data['data']:
+                        registration_url, user, user_agent = preloaded_data['data']
+                        preload_future = executor.submit(preload_user_data, preloaded_data)
+                    else:
+                        registration_url, user, user_agent = fetch_user_data()
 
-            try:
-                if preloaded_data['data']:
-                    registration_url, user, user_agent = preloaded_data['data']
-                    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
-                    preload_thread.start()
-                else:
-                    registration_url, user, user_agent = fetch_user_data()
+                    if not driver:
+                        driver = init_webdriver(user_agent)
 
-                if not driver:
-                    driver = init_webdriver(user_agent)
+                    driver.get(registration_url)
+                    fill_form(driver, user)
 
-                driver.get(registration_url)
-                fill_form(driver, user)
+                    if wait_for_result(driver, attempt_number):
+                        send_success_notification(user['username'])
 
-                if wait_for_result(driver, attempt_number):
-                    send_success_notification(user['username'])
+                except Exception as e:
+                    logging.error(f"注册失败: {e}，重新尝试...")
 
-            except Exception as e:
-                logging.error(f"注册失败: {e}，重新尝试...")
-
-    finally:
-        if driver:
-            driver.quit()
+        finally:
+            if driver:
+                driver.quit()
 
 if __name__ == "__main__":
     main()
