@@ -1,5 +1,4 @@
 import requests
-
 import logging
 import time
 from selenium import webdriver
