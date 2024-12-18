@@ -6,7 +6,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from threading import Thread
-from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -67,17 +66,6 @@ def fetch_user_data():
             logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
 
-# 异步加载用户数据（并发加载）
-def preload_user_data(preloaded_data):
-    """异步加载用户数据"""
-    try:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future = executor.submit(fetch_user_data)
-            preloaded_data['data'] = future.result()
-            logging.info("用户数据加载完成")
-    except Exception as e:
-        logging.error(f"预加载用户数据失败: {e}")
-
 # 填写表单
 def fill_form(driver, user):
     """填写注册表单"""
@@ -120,7 +108,7 @@ def solve_captcha(image_path):
         time.sleep(2)
 
 # 等待注册结果并处理验证码
-def wait_for_result(driver, attempt_number):
+def wait_for_result(driver, attempt_number, preload_data):
     """等待注册结果，并处理验证码"""
     start_time = time.time()
     captcha_filled = False
@@ -150,6 +138,11 @@ def wait_for_result(driver, attempt_number):
                 with open(captcha_image_path, 'wb') as file:
                     file.write(captcha_image.screenshot_as_png)
                 captcha_code = solve_captcha(captcha_image_path)
+
+                # 这里我们在等待验证码时预加载下一次用户数据
+                if not preload_data['data']:
+                    preload_data['data'] = fetch_user_data()
+
                 if captcha_code:
                     driver.find_element(By.ID, "id_captcha_1").send_keys(captcha_code)
                     driver.find_element(By.CSS_SELECTOR, ".button.is-primary").click()
@@ -169,18 +162,15 @@ def send_success_notification(user):
         message = f"注册成功！\n用户名: {user['username']}\n邮箱: {user['email']}\n名字: {user['firstName']} {user['lastName']}"
         response = requests.get(f"{NOTIFICATION_API_URL}{message}")
         response.raise_for_status()
+        logging.info(f"通知发送完成: {message}")
     except Exception as e:
         logging.error(f"通知发送失败: {e}")
 
 # 主流程
 def main():
     """主流程"""
-    preloaded_data = {'data': None}
     attempt_number = 0
-
-    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
-    preload_thread.start()
-
+    preload_data = {'data': None}  # 用于存储下一个用户数据
     driver = None
     try:
         while True:
@@ -188,16 +178,8 @@ def main():
             logging.info(f"开始第 {attempt_number} 次注册")
 
             try:
-                if preloaded_data['data']:
-                    registration_url, user, user
-                # 如果预加载的数据已经完成，使用预加载数据
-                if preloaded_data['data']:
-                    registration_url, user, user_agent = preloaded_data['data']
-                    # 异步重新加载下一次数据
-                    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
-                    preload_thread.start()
-                else:
-                    registration_url, user, user_agent = fetch_user_data()
+                # 获取当前用户数据
+                registration_url, user, user_agent = fetch_user_data()
 
                 # 初始化 WebDriver（仅在第一次初始化时创建）
                 if not driver:
@@ -209,7 +191,7 @@ def main():
                 # 填写表单
                 if fill_form(driver, user):
                     # 验证注册结果，并处理验证码
-                    if wait_for_result(driver, attempt_number):
+                    if wait_for_result(driver, attempt_number, preload_data):
                         send_success_notification(user)  # 发送注册成功的通知
 
             except Exception as e:
