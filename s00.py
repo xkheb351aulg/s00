@@ -66,6 +66,14 @@ def fetch_user_data():
             logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
 
+# 预加载下一次注册数据
+def preload_user_data(preloaded_data):
+    """异步预加载下一次注册用户数据"""
+    try:
+        preloaded_data['data'] = fetch_user_data()
+    except Exception as e:
+        logging.error(f"预加载用户数据失败: {e}")
+
 # 填写表单
 def fill_form(driver, user):
     """填写注册表单"""
@@ -108,7 +116,7 @@ def solve_captcha(image_path):
         time.sleep(2)
 
 # 等待注册结果并处理验证码
-def wait_for_result(driver, attempt_number, preload_data):
+def wait_for_result(driver, attempt_number):
     """等待注册结果，并处理验证码"""
     start_time = time.time()
     captcha_filled = False
@@ -138,11 +146,6 @@ def wait_for_result(driver, attempt_number, preload_data):
                 with open(captcha_image_path, 'wb') as file:
                     file.write(captcha_image.screenshot_as_png)
                 captcha_code = solve_captcha(captcha_image_path)
-
-                # 这里我们在等待验证码时预加载下一次用户数据
-                if not preload_data['data']:
-                    preload_data['data'] = fetch_user_data()
-
                 if captcha_code:
                     driver.find_element(By.ID, "id_captcha_1").send_keys(captcha_code)
                     driver.find_element(By.CSS_SELECTOR, ".button.is-primary").click()
@@ -169,8 +172,12 @@ def send_success_notification(user):
 # 主流程
 def main():
     """主流程"""
+    preloaded_data = {'data': None}
     attempt_number = 0
-    preload_data = {'data': None}  # 用于存储下一个用户数据
+
+    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
+    preload_thread.start()
+
     driver = None
     try:
         while True:
@@ -178,28 +185,28 @@ def main():
             logging.info(f"开始第 {attempt_number} 次注册")
 
             try:
-                # 获取当前用户数据
-                registration_url, user, user_agent = fetch_user_data()
+                if preloaded_data['data']:
+                    registration_url, user, user_agent = preloaded_data['data']
+                    preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
+                    preload_thread.start()
+                else:
+                    registration_url, user, user_agent = fetch_user_data()
 
-                # 初始化 WebDriver（仅在第一次初始化时创建）
                 if not driver:
                     driver = init_webdriver(user_agent)
 
-                # 访问注册页面
                 driver.get(registration_url)
+                fill_form(driver, user)
 
-                # 填写表单
-                if fill_form(driver, user):
-                    # 验证注册结果，并处理验证码
-                    if wait_for_result(driver, attempt_number, preload_data):
-                        send_success_notification(user)  # 发送注册成功的通知
+                if wait_for_result(driver, attempt_number):
+                    send_success_notification(user)
 
             except Exception as e:
-                logging.error(f"第 {attempt_number} 次注册过程中发生错误: {e}，将重新尝试...")
+                logging.error(f"注册失败: {e}，重新尝试...")
 
     finally:
         if driver:
-            driver.quit()  # 退出 WebDriver，清理资源
+            driver.quit()
 
 if __name__ == "__main__":
-    main()  # 启动主流程
+    main()
