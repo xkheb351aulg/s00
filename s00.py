@@ -134,7 +134,7 @@ def wait_for_result(driver, attempt_number):
         try:
             error_message = driver.find_element(By.CSS_SELECTOR, ".error_message")
             if error_message.is_displayed():
-                logging.error(f"注册失败: {error_message.text}")
+                logging.error(f"注册失败: {error_message.text}\n")
                 return False
         except:
             pass
@@ -182,7 +182,7 @@ def main():
     try:
         while True:
             attempt_number += 1
-            logging.info(f"开始第 {attempt_number} 次注册")
+            logging.info(f"\n开始第 {attempt_number} 次注册")
 
             try:
                 if preloaded_data['data']:
