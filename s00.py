@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -66,11 +67,14 @@ def fetch_user_data():
             logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
 
-# 预加载下一次注册数据
+# 异步加载用户数据（并发加载）
 def preload_user_data(preloaded_data):
-    """异步预加载下一次注册用户数据"""
+    """异步加载用户数据"""
     try:
-        preloaded_data['data'] = fetch_user_data()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future = executor.submit(fetch_user_data)
+            preloaded_data['data'] = future.result()
+            logging.info("用户数据加载完成")
     except Exception as e:
         logging.error(f"预加载用户数据失败: {e}")
 
@@ -165,7 +169,6 @@ def send_success_notification(user):
         message = f"注册成功！\n用户名: {user['username']}\n邮箱: {user['email']}\n名字: {user['firstName']} {user['lastName']}"
         response = requests.get(f"{NOTIFICATION_API_URL}{message}")
         response.raise_for_status()
-        logging.info(f"通知发送完成: {message}")
     except Exception as e:
         logging.error(f"通知发送失败: {e}")
 
@@ -186,27 +189,35 @@ def main():
 
             try:
                 if preloaded_data['data']:
+                    registration_url, user, user
+                # 如果预加载的数据已经完成，使用预加载数据
+                if preloaded_data['data']:
                     registration_url, user, user_agent = preloaded_data['data']
+                    # 异步重新加载下一次数据
                     preload_thread = Thread(target=preload_user_data, args=(preloaded_data,))
                     preload_thread.start()
                 else:
                     registration_url, user, user_agent = fetch_user_data()
 
+                # 初始化 WebDriver（仅在第一次初始化时创建）
                 if not driver:
                     driver = init_webdriver(user_agent)
 
+                # 访问注册页面
                 driver.get(registration_url)
-                fill_form(driver, user)
 
-                if wait_for_result(driver, attempt_number):
-                    send_success_notification(user)
+                # 填写表单
+                if fill_form(driver, user):
+                    # 验证注册结果，并处理验证码
+                    if wait_for_result(driver, attempt_number):
+                        send_success_notification(user)  # 发送注册成功的通知
 
             except Exception as e:
-                logging.error(f"注册失败: {e}，重新尝试...")
+                logging.error(f"第 {attempt_number} 次注册过程中发生错误: {e}，将重新尝试...")
 
     finally:
         if driver:
-            driver.quit()
+            driver.quit()  # 退出 WebDriver，清理资源
 
 if __name__ == "__main__":
-    main()
+    main()  # 启动主流程
