@@ -160,14 +160,36 @@ def wait_for_result(driver, attempt_number):
 
 # 发送注册成功通知
 def send_success_notification(user, user_agent):
-    """发送包含详细信息的注册成功通知，添加 UA"""
+    """发送注册信息保存请求到指定接口"""
     try:
-        message = f"注册成功！\n用户名: {user['username']}\n邮箱: {user['email']}\n名字: {user['firstName']} {user['lastName']}\nUser-Agent: {user_agent}"
-        response = requests.get(f"{NOTIFICATION_API_URL}{message}")
+        # 构建请求数据
+        data = {
+            "username": user['username'],
+            "email": user['email'],
+            "name": f"{user['firstName']} {user['lastName']}",
+            "ua": user_agent
+        }
+
+        # 发送 POST 请求
+        response = requests.post(
+            "https://keamlv.serv00.net/create_account.php",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(data)  # 将数据转换为 JSON 格式
+        )
+        
+        # 检查响应状态
         response.raise_for_status()
-        logging.info(f"通知发送完成: {message}")
+
+        # 记录成功日志
+        response_data = response.json()
+        if response_data.get("status") == "success":
+            logging.info(f"注册信息保存成功: {response_data}")
+        else:
+            logging.error(f"注册信息保存失败: {response_data.get('message', '未知错误')}")
+    
     except Exception as e:
-        logging.error(f"通知发送失败: {e}")
+        # 如果发生异常，记录错误日志
+        logging.error(f"保存注册信息失败: {e}")
 
 # 主流程
 def main():
