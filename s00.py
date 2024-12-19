@@ -199,7 +199,7 @@ def main():
                 fill_form(driver, user)
 
                 if wait_for_result(driver, attempt_number):
-                    send_success_notification(user)
+                    send_success_notification(user, user_agent)  # 传入 user_agent
 
             except Exception as e:
                 logging.error(f"注册失败: {e}，重新尝试...")
