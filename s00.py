@@ -2,14 +2,11 @@ import requests
 import logging
 import time
 import json
+from threading import Thread, Lock
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from concurrent.futures import ThreadPoolExecutor
-from queue import Queue
-import threading
-from datetime import datetime
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,48 +15,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 DATA_API_URL = "https://s00reg.64t76dee9sk5.workers.dev/api"
 NOTIFICATION_API_URL = "https://api.day.app/Y6wZN8swvDrno2URYa5CDZ/"
 
-# 创建数据队列和计数器
-user_data_queue = Queue()
-MAX_WORKERS = 10  # 并发线程数
-
-# 添加计数器类
-class RegistrationCounter:
-    def __init__(self):
-        self.total_attempts = 0
-        self.successful_registrations = 0
-        self.failed_registrations = 0
-        self._lock = threading.Lock()
-        self.start_time = datetime.now()
-
-    def increment_attempt(self):
-        with self._lock:
-            self.total_attempts += 1
-
-    def increment_success(self):
-        with self._lock:
-            self.successful_registrations += 1
-
-    def increment_failure(self):
-        with self._lock:
-            self.failed_registrations += 1
-
-    def get_stats(self):
-        duration = datetime.now() - self.start_time
-        hours = duration.total_seconds() / 3600
-        success_rate = (self.successful_registrations / self.total_attempts * 100) if self.total_attempts > 0 else 0
-        registrations_per_hour = self.successful_registrations / hours if hours > 0 else 0
-
-        return {
-            "总尝试次数": self.total_attempts,
-            "成功注册数": self.successful_registrations,
-            "失败次数": self.failed_registrations,
-            "运行时间": str(duration).split('.')[0],
-            "成功率": f"{success_rate:.2f}%",
-            "每小时注册数": f"{registrations_per_hour:.2f}"
-        }
-
-# 创建全局计数器实例
-counter = RegistrationCounter()
+# 日志锁
+log_lock = Lock()
 
 # 高级伪装设置
 def advanced_stealth(driver):
@@ -82,7 +39,8 @@ def advanced_stealth(driver):
     };
     """
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": stealth_script})
-    logging.info("高级伪装已启用")
+    with log_lock:
+        logging.info("高级伪装已启用")
 
 # 初始化 WebDriver
 def init_webdriver(user_agent):
@@ -97,7 +55,8 @@ def init_webdriver(user_agent):
     options.add_experimental_option("useAutomationExtension", False)
     driver = webdriver.Chrome(options=options)
     advanced_stealth(driver)
-    logging.info("WebDriver 初始化完成")
+    with log_lock:
+        logging.info("WebDriver 初始化完成")
     return driver
 
 # 获取用户数据
@@ -110,21 +69,9 @@ def fetch_user_data():
             data = response.json()
             return data['url'], data['user'], data['userAgent']
         except Exception as e:
-            logging.error(f"获取用户数据失败，重试中: {e}")
+            with log_lock:
+                logging.error(f"获取用户数据失败，重试中: {e}")
             time.sleep(2)
-
-# 数据预加载线程
-def data_preloader():
-    """持续预加载用户数据到队列"""
-    while True:
-        try:
-            if user_data_queue.qsize() < MAX_WORKERS * 2:
-                data = fetch_user_data()
-                user_data_queue.put(data)
-                logging.info(f"预加载数据成功，当前队列大小: {user_data_queue.qsize()}")
-        except Exception as e:
-            logging.error(f"预加载数据失败: {e}")
-        time.sleep(1)
 
 # 填写表单
 def fill_form(driver, user):
@@ -140,9 +87,11 @@ def fill_form(driver, user):
         tos_checkbox = wait.until(EC.element_to_be_clickable((By.ID, "id_tos")))
         if not tos_checkbox.is_selected():
             tos_checkbox.click()
-        logging.info(f"表单填写完成: {user}")
+        with log_lock:
+            logging.info(f"表单填写完成: {user}")
     except Exception as e:
-        logging.error(f"表单填写失败: {e}")
+        with log_lock:
+            logging.error(f"表单填写失败: {e}")
         return False
     return True
 
@@ -159,18 +108,20 @@ def solve_captcha(image_path):
                 result = response.json()
                 if result['success']:
                     captcha_code = result['result']
-                    logging.info(f"验证码识别成功: {captcha_code}")
+                    with log_lock:
+                        logging.info(f"验证码识别成功: {captcha_code}")
                     return captcha_code
                 else:
-                    logging.warning("验证码识别失败，重试中")
+                    with log_lock:
+                        logging.warning("验证码识别失败，重试中")
         except Exception as e:
-            logging.error(f"OCR API 调用失败: {e}")
+            with log_lock:
+                logging.error(f"OCR API 调用失败: {e}")
         time.sleep(2)
 
 # 等待注册结果并处理验证码
 def wait_for_result(driver, attempt_number):
     """等待注册结果，并处理验证码"""
-    counter.increment_attempt()
     start_time = time.time()
     captcha_filled = False
 
@@ -178,9 +129,9 @@ def wait_for_result(driver, attempt_number):
         try:
             success_notification = driver.find_element(By.CSS_SELECTOR, ".notification.is-success")
             if success_notification.is_displayed():
-                counter.increment_success()
-                logging.info(f"注册成功 (尝试次数: {attempt_number})")
-                logging.info(success_notification.text)
+                with log_lock:
+                    logging.info(f"注册成功 (尝试次数: {attempt_number})")
+                    logging.info(success_notification.text)
                 return True
         except:
             pass
@@ -188,8 +139,8 @@ def wait_for_result(driver, attempt_number):
         try:
             error_message = driver.find_element(By.CSS_SELECTOR, ".error_message")
             if error_message.is_displayed():
-                counter.increment_failure()
-                logging.error(f"注册失败: {error_message.text}\n\n")
+                with log_lock:
+                    logging.error(f"注册失败: {error_message.text}\n\n")
                 return False
         except:
             pass
@@ -197,7 +148,7 @@ def wait_for_result(driver, attempt_number):
         try:
             captcha_image = driver.find_element(By.CSS_SELECTOR, ".captcha")
             if not captcha_filled and captcha_image.is_displayed():
-                captcha_image_path = f"/tmp/captcha_image_{threading.get_ident()}.png"
+                captcha_image_path = "/tmp/captcha_image.png"
                 with open(captcha_image_path, 'wb') as file:
                     file.write(captcha_image.screenshot_as_png)
                 captcha_code = solve_captcha(captcha_image_path)
@@ -210,14 +161,15 @@ def wait_for_result(driver, attempt_number):
 
         time.sleep(0.5)
 
-    counter.increment_failure()
-    logging.warning(f"注册超时 (尝试次数: {attempt_number})")
+    with log_lock:
+        logging.warning(f"注册超时 (尝试次数: {attempt_number})")
     return False
 
 # 发送注册成功通知
 def send_success_notification(user, user_agent):
     """发送注册信息保存请求到指定接口"""
     try:
+        # 构建请求数据
         data = {
             "username": user['username'],
             "email": user['email'],
@@ -225,103 +177,74 @@ def send_success_notification(user, user_agent):
             "ua": user_agent
         }
 
+        # 发送 POST 请求
         response = requests.post(
             "https://keamlv.serv00.net/create_account.php",
             headers={"Content-Type": "application/json"},
-            data=json.dumps(data)
+            data=json.dumps(data)  # 将数据转换为 JSON 格式
         )
         
+        # 检查响应状态
         response.raise_for_status()
+
+        # 记录成功日志
         response_data = response.json()
-        
         if response_data.get("status") == "success":
-            logging.info(f"注册信息保存成功: {response_data}")
+            with log_lock:
+                logging.info(f"注册信息保存成功: {response_data}")
         else:
-            logging.error(f"注册信息保存失败: {response_data.get('message', '未知错误')}")
+            with log_lock:
+                logging.error(f"注册信息保存失败: {response_data.get('message', '未知错误')}")
     
     except Exception as e:
-        logging.error(f"保存注册信息失败: {e}")
+        # 如果发生异常，记录错误日志
+        with log_lock:
+            logging.error(f"保存注册信息失败: {e}")
 
-# 单个注册线程的处理函数
-def registration_worker():
-    """单个注册工作线程的处理逻辑"""
-    driver = None
+# 注册线程
+def register_thread(thread_id):
+    """注册线程"""
     attempt_number = 0
-    
+    driver = None
     try:
         while True:
             attempt_number += 1
-            if driver is None:
-                # 从队列获取数据
-                registration_url, user, user_agent = user_data_queue.get()
-                driver = init_webdriver(user_agent)
-            
+            with log_lock:
+                logging.info(f"[线程 {thread_id}] 开始第 {attempt_number} 次注册")
+
             try:
-                logging.info(f"线程 {threading.get_ident()} 开始第 {attempt_number} 次注册")
-                
+                registration_url, user, user_agent = fetch_user_data()
+
+                if not driver:
+                    driver = init_webdriver(user_agent)
+
                 driver.get(registration_url)
-                if fill_form(driver, user):
-                    if wait_for_result(driver, attempt_number):
-                        send_success_notification(user, user_agent)
-                
-                # 获取新的注册数据
-                registration_url, user, user_agent = user_data_queue.get()
-                
+                fill_form(driver, user)
+
+                if wait_for_result(driver, attempt_number):
+                    send_success_notification(user, user_agent)
+
             except Exception as e:
-                logging.error(f"注册过程发生错误: {e}")
-                if driver:
-                    driver.quit()
-                    driver = None
+                with log_lock:
+                    logging.error(f"[线程 {thread_id}] 注册失败: {e}，重新尝试...")
+
     finally:
         if driver:
             driver.quit()
 
-# 状态打印函数
-def print_stats():
-    """定期打印注册统计信息"""
-    while True:
-        stats = counter.get_stats()
-        logging.info("\n=== 注册统计信息 ===")
-        for key, value in stats.items():
-            logging.info(f"{key}: {value}")
-        logging.info("==================\n")
-        time.sleep(60)  # 每60秒打印一次统计信息
-
-# 主函数
+# 主流程
 def main():
-    """主程序入口"""
-    # 启动数据预加载线程
-    preloader = threading.Thread(target=data_preloader, daemon=True)
-    preloader.start()
-    
-    # 启动统计信息打印线程
-    stats_printer = threading.Thread(target=print_stats, daemon=True)
-    stats_printer.start()
-    
-    # 等待预加载队列中有足够的数据
-    while user_data_queue.qsize() < MAX_WORKERS:
-        time.sleep(1)
-    
-    try:
-        # 创建线程池并启动工作线程
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            workers = [executor.submit(registration_worker) for _ in range(MAX_WORKERS)]
-            
-            # 等待所有工作线程完成
-            for future in workers:
-                try:
-                    future.result()
-                except Exception as e:
-                    logging.error(f"工作线程异常退出: {e}")
-    except KeyboardInterrupt:
-        logging.info("检测到键盘中断，正在优雅退出...")
-    finally:
-        # 程序结束时打印最终统计信息
-        final_stats = counter.get_stats()
-        logging.info("\n=== 最终注册统计信息 ===")
-        for key, value in final_stats.items():
-            logging.info(f"{key}: {value}")
-        logging.info("=====================\n")
+    """主流程"""
+    num_threads = 20  # 并发线程数量
+    threads = []
+
+    for i in range(num_threads):
+        thread = Thread(target=register_thread, args=(i,))
+        thread.start()
+        threads.append(thread)
+
+    for thread in threads:
+        thread.join()
 
 if __name__ == "__main__":
     main()
