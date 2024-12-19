@@ -159,10 +159,10 @@ def wait_for_result(driver, attempt_number):
     return False
 
 # 发送注册成功通知
-def send_success_notification(user):
-    """发送包含详细信息的注册成功通知"""
+def send_success_notification(user, user_agent):
+    """发送包含详细信息的注册成功通知，添加 UA"""
     try:
-        message = f"注册成功！\n用户名: {user['username']}\n邮箱: {user['email']}\n名字: {user['firstName']} {user['lastName']}"
+        message = f"注册成功！\n用户名: {user['username']}\n邮箱: {user['email']}\n名字: {user['firstName']} {user['lastName']}\nUser-Agent: {user_agent}"
         response = requests.get(f"{NOTIFICATION_API_URL}{message}")
         response.raise_for_status()
         logging.info(f"通知发送完成: {message}")
