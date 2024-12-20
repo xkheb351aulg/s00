@@ -11,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# API 配置
+# API 配置 
 DATA_API_URL = "https://shy-poetry-8661.ymyuuu.workers.dev/api"
 NOTIFICATION_API_URL = "https://api.day.app/Y6wZN8swvDrno2URYa5CDZ/"
 
